@@ -36,6 +36,42 @@ python train.py data/wmt14.en-de-bin --save-dir checkpoints/wmt14_ende_distill_c
 --source-lang en --target-lang de
 ```
 
+#### WMT17_en-zh
+
+##### 没有constraint的training（普通的LevT）
+
+```bash
+python train.py data/wmt17.en-zh-bin --save-dir checkpoints/wmt17_enzh_distill \
+--ddp-backend=legacy_ddp --task translation_lev \
+--criterion nat_loss --arch levenshtein_transformer \
+--noise random_delete \
+--optimizer adam --adam-betas '(0.9,0.98)' \
+--lr 0.0005 --lr-scheduler inverse_sqrt --stop-min-lr 1e-09 \
+--warmup-updates 10000 --warmup-init-lr 1e-07 \
+--label-smoothing 0.1 --dropout 0.3 --weight-decay 0.01 \
+--decoder-learned-pos --encoder-learned-pos --apply-bert-init \
+--log-format simple --log-interval 1 --fixed-validation-seed 7 \
+--max-tokens 8192 --save-interval-updates 10000 --max-update 300000 \
+--source-lang en --target-lang zh
+```
+
+##### constraint training
+
+```bash
+python train.py data/wmt17.en-zh-bin --save-dir checkpoints/wmt17_enzh_distill_cst \
+--ddp-backend=legacy_ddp --task translation_lev \
+--criterion nat_loss --arch levenshtein_transformer \
+--noise random_delete_wo_cs \
+--optimizer adam --adam-betas '(0.9,0.98)' \
+--lr 0.0005 --lr-scheduler inverse_sqrt --stop-min-lr 1e-09 \
+--warmup-updates 10000 --warmup-init-lr 1e-07 \
+--label-smoothing 0.1 --dropout 0.3 --weight-decay 0.01 \
+--decoder-learned-pos --encoder-learned-pos --apply-bert-init \
+--log-format simple --log-interval 1 --fixed-validation-seed 7 \
+--max-tokens 8192 --save-interval-updates 10000 --max-update 300000 \
+--source-lang en --target-lang zh
+```
+
 ### 环境
 
 配置如普通的levt，参考https://github.com/pytorch/fairseq/tree/master/examples/nonautoregressive_translation
@@ -48,3 +84,5 @@ python train.py data/wmt14.en-de-bin --save-dir checkpoints/wmt14_ende_distill_c
 ### 数据
 
 放在data目录下，wmt14.en-de-bin中，train.constraint 是 每条training数据对应的constraint word，test.constraint 同理
+
+- 下载：https://cip20w1dt9.feishu.cn/drive/folder/fldcnwtCgvMAbHkOzkSLMoCq6Yc
