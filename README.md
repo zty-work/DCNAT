@@ -22,7 +22,8 @@ python train.py data/wmt14.en-de-bin --save-dir checkpoints/wmt14_ende_distill \
 ##### constraint training
 
 ```bash
-python train.py data/wmt14.en-de-bin --save-dir checkpoints/wmt14_ende_distill_cst --ddp-backend=legacy_ddp --task translation_lev \
+python train.py data/wmt14.en-de-bin --save-dir checkpoints/wmt14_ende_distill_cst \
+--ddp-backend=legacy_ddp --task translation_lev \
 --criterion nat_loss --arch levenshtein_transformer \
 --noise random_delete_wo_cs \
 --optimizer adam --adam-betas '(0.9,0.98)' \
