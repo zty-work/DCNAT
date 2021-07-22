@@ -854,6 +854,9 @@ class GenerationConfig(FairseqDataclass):
     retain_dropout: bool = field(
         default=False, metadata={"help": "Use dropout at inference time"},
     )
+    decoding_mode: int = field(
+        default=0, metadata={"help": "0 for not constraint, 1 for soft constraint, 2 for hard constraint"}
+    )
     # temporarily set to Any until https://github.com/facebookresearch/hydra/issues/1117 is fixed
     # retain_dropout_modules: Optional[List[str]] = field(
     retain_dropout_modules: Any = field(

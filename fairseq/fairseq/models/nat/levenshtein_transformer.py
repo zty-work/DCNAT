@@ -142,6 +142,8 @@ class LevenshteinTransformerModel(FairseqNATModel):
 
         output_tokens = decoder_out.output_tokens
         output_scores = decoder_out.output_scores
+        cs_del_mask = decoder_out.cs_del_mask
+        cs_ins_mask = decoder_out.cs_ins_mask
         attn = decoder_out.attn
         history = decoder_out.history
 
@@ -167,7 +169,7 @@ class LevenshteinTransformerModel(FairseqNATModel):
             )
             word_del_pred = word_del_score.max(-1)[1].bool()
 
-            _tokens, _scores, _attn = _apply_del_words(
+            _tokens, _scores, _cs_del_mask, _cs_ins_mask, _attn = _apply_del_words(
                 output_tokens[can_del_word],
                 output_scores[can_del_word],
                 word_del_attn,
@@ -175,9 +177,13 @@ class LevenshteinTransformerModel(FairseqNATModel):
                 self.pad,
                 self.bos,
                 self.eos,
+                cs_del_mask[can_del_word],
+                cs_ins_mask[can_del_word]
             )
             output_tokens = _fill(output_tokens, can_del_word, _tokens, self.pad)
             output_scores = _fill(output_scores, can_del_word, _scores, 0)
+            cs_del_mask = _fill(cs_del_mask,can_del_word,_cs_del_mask,0)
+            cs_ins_mask = _fill(cs_ins_mask,can_del_word,_cs_ins_mask,0)
             attn = _fill(attn, can_del_word, _attn, 0.0)
 
             if history is not None:
@@ -198,17 +204,20 @@ class LevenshteinTransformerModel(FairseqNATModel):
                 mask_ins_pred, max_lens[can_ins_mask, None].expand_as(mask_ins_pred)
             )
 
-            _tokens, _scores = _apply_ins_masks(
+            _tokens, _scores, _cs_ins_mask, _cs_del_mask = _apply_ins_masks(
                 output_tokens[can_ins_mask],
                 output_scores[can_ins_mask],
                 mask_ins_pred,
                 self.pad,
                 self.unk,
                 self.eos,
+                cs_ins_mask[can_ins_mask],
+                cs_del_mask[can_ins_mask]
             )
             output_tokens = _fill(output_tokens, can_ins_mask, _tokens, self.pad)
             output_scores = _fill(output_scores, can_ins_mask, _scores, 0)
-
+            cs_ins_mask = _fill(cs_ins_mask,can_ins_mask,_cs_ins_mask, 0)
+            cs_del_mask = _fill(cs_del_mask,can_ins_mask,_cs_del_mask, 0)
             if history is not None:
                 history.append(output_tokens.clone())
 
@@ -240,6 +249,8 @@ class LevenshteinTransformerModel(FairseqNATModel):
         cut_off = output_tokens.ne(self.pad).sum(1).max()
         output_tokens = output_tokens[:, :cut_off]
         output_scores = output_scores[:, :cut_off]
+        cs_del_mask = cs_del_mask[:,:cut_off]
+        cs_ins_mask = cs_ins_mask[:,:cut_off]
         attn = None if attn is None else attn[:, :cut_off, :]
 
         return decoder_out._replace(
@@ -247,12 +258,35 @@ class LevenshteinTransformerModel(FairseqNATModel):
             output_scores=output_scores,
             attn=attn,
             history=history,
+            cs_del_mask=cs_del_mask,
+            cs_ins_mask=cs_ins_mask
         )
 
-    def initialize_output_tokens(self, encoder_out, src_tokens):
-        initial_output_tokens = src_tokens.new_zeros(src_tokens.size(0), 2)
-        initial_output_tokens[:, 0] = self.bos
-        initial_output_tokens[:, 1] = self.eos
+    def initialize_output_tokens(self, encoder_out, src_tokens, sample_constraints, mode):
+        max_length=max([sum([len(tp) for tp in _]) for _ in sample_constraints])+2
+        initial_output_tokens=src_tokens.new_zeros(src_tokens.size(0),max_length)
+        cs_del_mask=src_tokens.new_zeros(src_tokens.size(0),max_length)
+        cs_ins_mask=src_tokens.new_zeros(src_tokens.size(0),max_length)
+
+        initial_output_tokens+=self.pad
+        initial_output_tokens[:,0]=self.bos
+        for i in range(initial_output_tokens.size(0)):
+            index=1
+            for j in range(len(sample_constraints[i])):
+                for k in range(len(sample_constraints[i][j])):
+                    initial_output_tokens[i][index]=sample_constraints[i][j][k]
+                    if mode==2:
+                        cs_del_mask[i][index]=1
+                    if k > 0 :
+                        if mode==2:
+                            cs_ins_mask[i][index]=1
+                    index+=1
+            initial_output_tokens[i][index]=self.eos
+
+        # initial_output_tokens = src_tokens.new_zeros(src_tokens.size(0), 2)
+        # initial_output_tokens[:, 0] = self.bos
+        # initial_output_tokens[:, 1] = self.eos
+
 
         initial_output_scores = initial_output_tokens.new_zeros(
             *initial_output_tokens.size()
@@ -265,6 +299,8 @@ class LevenshteinTransformerModel(FairseqNATModel):
             step=0,
             max_step=0,
             history=None,
+            cs_del_mask=cs_del_mask,
+            cs_ins_mask=cs_ins_mask
         )
 
 

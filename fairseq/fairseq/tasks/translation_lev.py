@@ -40,6 +40,7 @@ class TranslationLevenshteinTask(TranslationTask):
         self.constraints={"train":None,"valid":None,"test":None}
         if self.constraint_training:
             self.build_constraints("train")
+            self.build_constraints("test")
 
     # Add by zc
     def build_constraints(self,dataset):

@@ -12,7 +12,7 @@ from fairseq import utils
 
 DecoderOut = namedtuple(
     "IterativeRefinementDecoderOut",
-    ["output_tokens", "output_scores", "attn", "step", "max_step", "history"],
+    ["output_tokens", "output_scores", "attn", "step", "max_step", "history", "cs_del_mask", "cs_ins_mask"],
 )
 
 
@@ -133,7 +133,9 @@ class IterativeRefinementGenerator(object):
 
         # initialize
         encoder_out = model.forward_encoder([src_tokens, src_lengths])
-        prev_decoder_out = model.initialize_output_tokens(encoder_out, src_tokens)
+        prev_decoder_out = model.initialize_output_tokens(encoder_out, src_tokens, sample['sample_constraints'], sample["mode"])
+
+
 
         if self.beam_size > 1:
             assert (
@@ -162,16 +164,18 @@ class IterativeRefinementGenerator(object):
 
         finalized = [[] for _ in range(bsz)]
 
-        def is_a_loop(x, y, s, a):
+        def is_a_loop(x, y, s,cs_del_mask,cs_ins_mask, a):
             b, l_x, l_y = x.size(0), x.size(1), y.size(1)
             if l_x > l_y:
                 y = torch.cat([y, x.new_zeros(b, l_x - l_y).fill_(self.pad)], 1)
                 s = torch.cat([s, s.new_zeros(b, l_x - l_y)], 1)
+                cs_del_mask = torch.cat([cs_del_mask, cs_del_mask.new_zeros(b, l_x - l_y)], 1)
+                cs_ins_mask = torch.cat([cs_ins_mask, cs_ins_mask.new_zeros(b, l_x - l_y)], 1)
                 if a is not None:
                     a = torch.cat([a, a.new_zeros(b, l_x - l_y, a.size(2))], 1)
             elif l_x < l_y:
                 x = torch.cat([x, y.new_zeros(b, l_y - l_x).fill_(self.pad)], 1)
-            return (x == y).all(1), y, s, a
+            return (x == y).all(1), y, s,cs_del_mask,cs_ins_mask,a
 
         def finalized_hypos(step, prev_out_token, prev_out_score, prev_out_attn):
             cutoff = prev_out_token.ne(self.pad)
@@ -197,7 +201,6 @@ class IterativeRefinementGenerator(object):
             }
 
         for step in range(self.max_iter + 1):
-
             decoder_options = {
                 "eos_penalty": self.eos_penalty,
                 "max_ratio": self.max_ratio,
@@ -214,15 +217,19 @@ class IterativeRefinementGenerator(object):
 
             if self.adaptive:
                 # terminate if there is a loop
-                terminated, out_tokens, out_scores, out_attn = is_a_loop(
+                terminated, out_tokens, out_scores, cs_del_mask,cs_ins_mask, out_attn = is_a_loop(
                     prev_output_tokens,
                     decoder_out.output_tokens,
                     decoder_out.output_scores,
+                    decoder_out.cs_del_mask,
+                    decoder_out.cs_ins_mask,
                     decoder_out.attn,
                 )
                 decoder_out = decoder_out._replace(
                     output_tokens=out_tokens,
                     output_scores=out_scores,
+                    cs_del_mask=cs_del_mask,
+                    cs_ins_mask=cs_ins_mask,
                     attn=out_attn,
                 )
 
@@ -238,6 +245,8 @@ class IterativeRefinementGenerator(object):
             finalized_idxs = sent_idxs[terminated]
             finalized_tokens = decoder_out.output_tokens[terminated]
             finalized_scores = decoder_out.output_scores[terminated]
+            finalized_cst_del_mask = decoder_out.cs_del_mask[terminated]
+            finalized_cst_ins_mask = decoder_out.cs_ins_mask[terminated]
             finalized_attn = (
                 None
                 if (decoder_out.attn is None or decoder_out.attn.size(0) == 0)
@@ -281,6 +290,8 @@ class IterativeRefinementGenerator(object):
                 history=[h[not_terminated] for h in decoder_out.history]
                 if decoder_out.history is not None
                 else None,
+                cs_del_mask=decoder_out.cs_del_mask[not_terminated],
+                cs_ins_mask=decoder_out.cs_ins_mask[not_terminated]
             )
             encoder_out = model.encoder.reorder_encoder_out(
                 encoder_out, not_terminated.nonzero(as_tuple=False).squeeze()

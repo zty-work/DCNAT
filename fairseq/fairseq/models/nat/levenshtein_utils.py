@@ -153,7 +153,7 @@ def _get_del_targets(in_tokens, out_tokens, padding_idx):
 
 
 def _apply_ins_masks(
-    in_tokens, in_scores, mask_ins_pred, padding_idx, unk_idx, eos_idx
+    in_tokens, in_scores, mask_ins_pred, padding_idx, unk_idx, eos_idx, cs_ins_mask, cs_del_mask
 ):
 
     in_masks = in_tokens.ne(padding_idx)
@@ -162,7 +162,8 @@ def _apply_ins_masks(
     # HACK: hacky way to shift all the paddings to eos first.
     in_tokens.masked_fill_(~in_masks, eos_idx)
     mask_ins_pred.masked_fill_(~in_masks[:, 1:], 0)
-
+    # Add by zc
+    mask_ins_pred.masked_fill_(cs_ins_mask[:,1:], 0)
     out_lengths = in_lengths + mask_ins_pred.sum(1)
     out_max_len = out_lengths.max()
     out_masks = new_arange(out_lengths, out_max_len)[None, :] < out_lengths[:, None]
@@ -173,9 +174,16 @@ def _apply_ins_masks(
         .fill_(padding_idx)
         .masked_fill_(out_masks, unk_idx)
     )
+    out_cs_ins_mask = (
+        in_tokens.new_zeros(in_tokens.size(0), out_max_len)
+    )
+    out_cs_del_mask = (
+        in_tokens.new_zeros(in_tokens.size(0), out_max_len)
+    )
     out_tokens[:, 0] = in_tokens[:, 0]
     out_tokens.scatter_(1, reordering, in_tokens[:, 1:])
-
+    out_cs_ins_mask.scatter_(1, reordering, cs_ins_mask[:,1:])
+    out_cs_del_mask.scatter_(1, reordering, cs_del_mask[:,1:])
     out_scores = None
     if in_scores is not None:
         in_scores.masked_fill_(~in_masks, 0)
@@ -183,7 +191,7 @@ def _apply_ins_masks(
         out_scores[:, 0] = in_scores[:, 0]
         out_scores.scatter_(1, reordering, in_scores[:, 1:])
 
-    return out_tokens, out_scores
+    return out_tokens, out_scores, out_cs_ins_mask, out_cs_del_mask
 
 
 def _apply_ins_words(in_tokens, in_scores, word_ins_pred, word_ins_scores, unk_idx):
@@ -201,7 +209,7 @@ def _apply_ins_words(in_tokens, in_scores, word_ins_pred, word_ins_scores, unk_i
 
 
 def _apply_del_words(
-    in_tokens, in_scores, in_attn, word_del_pred, padding_idx, bos_idx, eos_idx
+    in_tokens, in_scores, in_attn, word_del_pred, padding_idx, bos_idx, eos_idx, cs_del_mask, cs_ins_mask
 ):
     # apply deletion to a tensor
     in_masks = in_tokens.ne(padding_idx)
@@ -210,10 +218,14 @@ def _apply_del_words(
     max_len = in_tokens.size(1)
     word_del_pred.masked_fill_(~in_masks, 1)
     word_del_pred.masked_fill_(bos_eos_masks, 0)
+    # add by zc
+    word_del_pred.masked_fill_(cs_del_mask, 0)
 
     reordering = new_arange(in_tokens).masked_fill_(word_del_pred, max_len).sort(1)[1]
 
     out_tokens = in_tokens.masked_fill(word_del_pred, padding_idx).gather(1, reordering)
+    _cs_del_mask=cs_del_mask.gather(1,reordering)
+    _cs_ins_mask=cs_ins_mask.gather(1,reordering)
 
     out_scores = None
     if in_scores is not None:
@@ -225,7 +237,7 @@ def _apply_del_words(
         _reordering = reordering[:, :, None].expand_as(in_attn)
         out_attn = in_attn.masked_fill(_mask, 0.0).gather(1, _reordering)
 
-    return out_tokens, out_scores, out_attn
+    return out_tokens, out_scores, _cs_del_mask, _cs_ins_mask, out_attn
 
 
 def _skip(x, mask):
